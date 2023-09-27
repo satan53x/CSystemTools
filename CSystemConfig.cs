@@ -10,10 +10,12 @@ namespace CSystemArc
     internal class CSystemConfig
     {
         private static readonly Encoding SjisEncoding = Encoding.GetEncoding(932, EncoderFallback.ExceptionFallback, DecoderFallback.ExceptionFallback);
+        private static readonly Encoding UTF16Encoding = Encoding.GetEncoding("UTF-16", EncoderFallback.ExceptionFallback, DecoderFallback.ExceptionFallback);
 
         private List<byte[]> _items;
         private byte[] _data1;
         private byte[] _data2;
+        private byte[] _data3;
 
         public void Read(Stream stream)
         {
@@ -27,6 +29,10 @@ namespace CSystemArc
             int data2Size = Bcd.Read(stream);
             _data2 = new byte[data2Size];
             stream.Read(_data2, 0, _data2.Length);
+
+            int data3Size = Bcd.Read(stream);
+            _data3 = new byte[data3Size];
+            stream.Read(_data3, 0, _data3.Length);
 
             if (stream.Position != stream.Length)
                 throw new InvalidDataException();
@@ -42,6 +48,9 @@ namespace CSystemArc
 
             Bcd.Write(stream, _data2.Length);
             stream.Write(_data2, 0, _data2.Length);
+
+            Bcd.Write(stream, _data3.Length);
+            stream.Write(_data3, 0, _data3.Length);
         }
 
         public XDocument ToXml()
@@ -74,12 +83,19 @@ namespace CSystemArc
                     BytesToHex(_data2)
                 );
 
+            XElement data3Elem =
+                new XElement(
+                    "data3",
+                    BytesToHex(_data3)
+                );
+
             return new XDocument(
                 new XElement(
                     "csystem",
                     configElem,
                     data1Elem,
-                    data2Elem
+                    data2Elem,
+                    data3Elem
                 )
             );
         }
@@ -111,6 +127,12 @@ namespace CSystemArc
                 throw new InvalidDataException("<data2> element is missing");
 
             _data2 = HexToBytes(data2Elem.Value);
+
+            XElement data3Elem = root.Element("data3");
+            if (data3Elem == null)
+                throw new InvalidDataException("<data3> element is missing");
+
+            _data3 = HexToBytes(data3Elem.Value);
         }
 
         private static List<byte[]> UnpackItems(byte[] data)
@@ -120,15 +142,19 @@ namespace CSystemArc
             List<byte[]> items = new List<byte[]>();
             while (stream.Position < stream.Length)
             {
-                int length = reader.ReadInt32();
+                int length = reader.ReadInt32() + 1;
                 byte[] item = reader.ReadBytes(length);
 
                 if (item.Length > 0 && item[0] == (byte)'S')
                 {
-                    byte[] xorlessItem = new byte[item.Length - 4];
-                    xorlessItem[0] = item[0];
-                    Array.Copy(item, 5, xorlessItem, 1, item.Length - 5);
+                    byte[] xorlessItem = new byte[item.Length - 1];
+                    //xorlessItem[0] = item[0];
+                    Array.Copy(item, 1, xorlessItem, 0, item.Length - 1);
                     item = xorlessItem;
+                }
+                else
+                {
+                    Console.WriteLine("UnpackItems: item not start with 'S'");
                 }
 
                 if (item.Length >= 2 && item[item.Length - 2] == 0xFE && item[item.Length - 1] == 0xA)
@@ -150,15 +176,15 @@ namespace CSystemArc
             foreach (byte[] item in items)
             {
                 byte[] itemToWrite = item;
-                if (item[0] == (byte)'S')
+                //if (item[0] == (byte)'S')
                 {
-                    byte[] xoredItem = new byte[item.Length + 4];
-                    xoredItem[0] = item[0];
-                    Array.Copy(item, 1, xoredItem, 5, item.Length - 1);
+                    byte[] xoredItem = new byte[item.Length + 1];
+                    xoredItem[0] = (byte)'S';
+                    Array.Copy(item, 0, xoredItem, 1, item.Length);
                     itemToWrite = xoredItem;
                 }
 
-                writer.Write(itemToWrite.Length);
+                writer.Write(itemToWrite.Length - 1);
                 writer.Write(itemToWrite);
             }
 
@@ -186,7 +212,7 @@ namespace CSystemArc
 
             try
             {
-                string text = SjisEncoding.GetString(_items[index]);
+                string text = UTF16Encoding.GetString(_items[index]);
                 return new XElement(
                     "item",
                     new XAttribute("type", "text"),
@@ -198,6 +224,8 @@ namespace CSystemArc
                 return BinaryItemToXml(index);
             }
         }
+
+        
 
         private XElement DictionaryItemToXml(int index)
         {
@@ -215,24 +243,28 @@ namespace CSystemArc
             if ((char)item[0] != '#')
                 throw new InvalidDataException();
 
-            int offset = 1;
+            int offset = 2;
             while (offset < item.Length)
             {
                 string key = null;
-                while (true)
+                while (offset < item.Length)
                 {
-                    char c = (char)item[offset++];
-                    if (c == ':')
+                    string c = Helper.ReadUTF16(item, offset);
+                    offset += 2;
+                    if (c.Equals(":"))
                         break;
 
                     key += c;
                 }
+                if (offset >= item.Length)
+                    break;
 
                 int valueOffset = offset;
                 int value = 0;
                 while (true)
                 {
-                    byte b = item[offset++];
+                    byte b = item[offset];
+                    offset += 2;
                     if (b == 201)
                         break;
 
@@ -242,7 +274,7 @@ namespace CSystemArc
                         value = 0;
                 }
 
-                if (offset == valueOffset + 1)
+                if (offset == valueOffset + 2)
                     value = -1;
 
                 dictElem.Add(new XElement("entry", new XAttribute("key", key), value.ToString()));
@@ -276,23 +308,26 @@ namespace CSystemArc
 
         private static byte[] TextItemFromXml(XElement elem)
         {
-            return SjisEncoding.GetBytes(elem.Value);
+            return UTF16Encoding.GetBytes(elem.Value);
         }
 
         private static byte[] DictionaryItemFromXml(XElement elem)
         {
             MemoryStream stream = new MemoryStream();
-            stream.WriteByte((byte)'#');
+            //stream.WriteByte((byte)'#');
+            Helper.WriteUTF16(stream, "#");
 
             foreach (XElement entry in elem.Elements("entry"))
             {
                 string key = entry.Attribute("key").Value;
-                foreach (char c in key)
-                {
-                    stream.WriteByte((byte)c);
-                }
+                //foreach (char c in key)
+                //{
+                //    stream.WriteByte((byte)c);
+                //}
+                Helper.WriteUTF16(stream, key);
 
-                stream.WriteByte((byte)':');
+                //stream.WriteByte((byte)':');
+                Helper.WriteUTF16(stream, ":");
 
                 int value = int.Parse(entry.Value);
                 if (value < -1)
@@ -305,18 +340,22 @@ namespace CSystemArc
                 else if (value == 0)
                 {
                     stream.WriteByte(250);
+                    stream.WriteByte(0);
                 }
                 else
                 {
                     while (value > 200)
                     {
                         stream.WriteByte(200);
+                        stream.WriteByte(0);
                         value -= 200;
                     }
                     stream.WriteByte((byte)value);
+                    stream.WriteByte(0);
                 }
 
                 stream.WriteByte(201);
+                stream.WriteByte(0);
             }
 
             byte[] item = new byte[stream.Length];
@@ -325,7 +364,7 @@ namespace CSystemArc
             return item;
         }
 
-        private static string BytesToHex(byte[] bytes)
+        public static string BytesToHex(byte[] bytes)
         {
             StringBuilder hex = new StringBuilder();
             foreach (byte b in bytes)
@@ -339,7 +378,7 @@ namespace CSystemArc
             return hex.ToString();
         }
 
-        private static byte[] HexToBytes(string hex)
+        public static byte[] HexToBytes(string hex)
         {
             hex = hex.Replace(" ", "");
             if (hex.Length % 2 != 0)

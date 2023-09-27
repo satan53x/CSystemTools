@@ -16,6 +16,8 @@ namespace CSystemArc
             byte[] decompressed = new byte[uncompressedSize];
             using LzssStream lzss = new LzssStream(stream, CompressionMode.Decompress, true);
             lzss.Read(decompressed, 0, uncompressedSize);
+            //Debug
+            Helper.DumpBytes(decompressed);
 
             stream.Position = offset + compressedSize;
             return decompressed;
@@ -28,6 +30,9 @@ namespace CSystemArc
 
         public static void Compress(ArraySegment<byte> uncompressedData, Stream stream)
         {
+            //Debug
+            Helper.DumpBytes(uncompressedData.Array);
+
             using MemoryStream compressedStream = new MemoryStream();
             using LzssStream lzss = new LzssStream(compressedStream, CompressionMode.Compress);
             lzss.Write(uncompressedData.Array, uncompressedData.Offset, uncompressedData.Count);

@@ -8,10 +8,11 @@
     <OutputType>Exe</OutputType>
     <RootNamespace>CSystemArc</RootNamespace>
     <AssemblyName>CSystemArc</AssemblyName>
-    <TargetFrameworkVersion>v4.8</TargetFrameworkVersion>
+    <TargetFrameworkVersion>v4.6.1</TargetFrameworkVersion>
     <FileAlignment>512</FileAlignment>
     <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
     <Deterministic>true</Deterministic>
+    <TargetFrameworkProfile />
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
     <PlatformTarget>AnyCPU</PlatformTarget>
@@ -56,6 +57,7 @@
     <Compile Include="BcdCompression.cs" />
     <Compile Include="CSystemConfig.cs" />
     <Compile Include="CSystemImage.cs" />
+    <Compile Include="Helper.cs" />
     <Compile Include="LzssStream.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
