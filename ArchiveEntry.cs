@@ -58,6 +58,24 @@ namespace CSystemArc
             set;
         }
 
+        public int IsComporessed
+        {
+            get;
+            set;
+        }
+
+        public byte[] PreData
+        {
+            get;
+            set;
+        }
+
+        public ArchiveEntry()
+        {
+            IsComporessed = -1;
+            PreData = null;
+        }
+
         public void Read(BinaryReader reader)
         {
             Version = reader.ReadInt32();

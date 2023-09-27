@@ -71,6 +71,26 @@ namespace CSystemArc
                                type == 'n' ||
                                type == 'o' ||
                                type == 'p');
+            // 缓存
+            Cache.ReadEntry(entry);
+            // pre data
+            if (entry.PreData != null)
+            {
+                contentStream.Write(entry.PreData, 0, entry.PreData.Length);
+                entry.Offset += entry.PreData.Length;
+            }
+            // 是否压缩
+            switch (entry.IsComporessed)
+            {
+                case 0:
+                    compressed = false;
+                    break;
+                case 1:
+                    compressed = true;
+                    break;
+                default:
+                    break;
+            }
             if (compressed)
             {
                 using LzssStream lzss = new LzssStream(contentStream, CompressionMode.Compress, true);

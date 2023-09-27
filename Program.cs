@@ -108,6 +108,8 @@ namespace CSystemArc
                 }
                 entries = failedEntries;
             } while (failedEntries.Count > 0);
+            //保存缓存
+            Cache.Save(Path.Combine(folderPath, ".."));
         }
 
         private static bool TryUnpackEntry(ArchiveReader reader, ArchiveEntry entry, string folderPath)
@@ -116,8 +118,8 @@ namespace CSystemArc
             byte[] content = reader.GetEntryContent(entry);
             switch (entry.Type)
             {
-                case 'b':
-                    return TryUnpackImage(reader, entry, content, folderPath);
+                //case 'b':
+                //    return TryUnpackImage(reader, entry, content, folderPath);
 
                 default:
                     UnpackRaw(entry, content, folderPath);
@@ -164,6 +166,8 @@ namespace CSystemArc
         private static void Pack(int version, string folderPath, string indexFilePath, IList<string> contentFilePaths)
         {
             VerifyFolderExists(folderPath);
+            //加载缓存
+            Cache.Load(Path.Combine(folderPath, ".."));
 
             using ArchiveWriter writer = new ArchiveWriter(version, indexFilePath, contentFilePaths);
             PackRawFiles(folderPath, writer);

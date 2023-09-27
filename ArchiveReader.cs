@@ -46,10 +46,21 @@ namespace CSystemArc
 
             int prevId = -1;
 
+            int preOffset = 0;
             while (indexStream.Position < indexStream.Length)
             {
                 ArchiveEntry entry = new ArchiveEntry();
                 entry.Read(indexReader);
+                if (preOffset < entry.Offset)
+                {
+                    //exist pre data
+                    entry.PreData = new byte[entry.Offset - preOffset];
+                }
+                else if (preOffset > entry.Offset)
+                {
+                    throw new InvalidDataException($"Entry offset smaller than before: {entry.Id}");
+                }
+                preOffset = entry.Offset + entry.CompressedSize;
 
                 List<ArchiveEntry> entriesOfType = _entries.FetchValue(entry.Type, () => new List<ArchiveEntry>());
                 entry.Index = entriesOfType.Count;
@@ -74,16 +85,26 @@ namespace CSystemArc
             Stream contentStream = _contentStreams[entry.ContentArchiveIndex];
             contentStream.Position = entry.Offset;
 
+            if (entry.PreData != null)
+            {
+                //有pre data
+                contentStream.Position -= entry.PreData.Length;
+                contentStream.Read(entry.PreData, 0, entry.PreData.Length);
+            }
+
             byte[] data = new byte[entry.UncompressedSize];
             if (entry.CompressedSize == entry.UncompressedSize)
             {
                 contentStream.Read(data, 0, data.Length);
+                entry.IsComporessed = 0;
             }
             else
             {
                 using LzssStream lzss = new LzssStream(contentStream, CompressionMode.Decompress, true);
                 lzss.Read(data, 0, data.Length);
+                entry.IsComporessed = 1;
             }
+            Cache.WriteEntry(entry);
             return data;
         }
 
