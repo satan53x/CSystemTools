@@ -2,6 +2,9 @@
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Linq;
+using System.Runtime.InteropServices.ComTypes;
+using System.Security.Cryptography;
 using System.Text;
 using System.Xml.Linq;
 
@@ -13,26 +16,28 @@ namespace CSystemArc
         private static readonly Encoding UTF16Encoding = Encoding.GetEncoding("UTF-16", EncoderFallback.ExceptionFallback, DecoderFallback.ExceptionFallback);
 
         private List<byte[]> _items;
-        private byte[] _data1;
-        private byte[] _data2;
-        private byte[] _data3;
+        private const int MaxDataCount = 4;
+        private List<byte[]> _dataList;
+
+        public int Version = 23;
 
         public void Read(Stream stream)
         {
             byte[] stringData = BcdCompression.Decompress(stream);
             _items = UnpackItems(stringData);
 
-            int data1Size = Bcd.Read(stream);
-            _data1 = new byte[data1Size];
-            stream.Read(_data1, 0, _data1.Length);
-
-            int data2Size = Bcd.Read(stream);
-            _data2 = new byte[data2Size];
-            stream.Read(_data2, 0, _data2.Length);
-
-            int data3Size = Bcd.Read(stream);
-            _data3 = new byte[data3Size];
-            stream.Read(_data3, 0, _data3.Length);
+            _dataList = new List<byte[]>();
+            for (int i = 0; i < MaxDataCount; i++)
+            {
+                byte[] data = null;
+                if (stream.Position < stream.Length)
+                {
+                    int dataSize = Bcd.Read(stream);
+                    data = new byte[dataSize];
+                    stream.Read(data, 0, data.Length);
+                }
+                _dataList.Add(data);
+            }
 
             if (stream.Position != stream.Length)
                 throw new InvalidDataException();
@@ -43,60 +48,84 @@ namespace CSystemArc
             ArraySegment<byte> stringData = PackItems(_items);
             BcdCompression.Compress(stringData, stream);
 
-            Bcd.Write(stream, _data1.Length);
-            stream.Write(_data1, 0, _data1.Length);
-
-            Bcd.Write(stream, _data2.Length);
-            stream.Write(_data2, 0, _data2.Length);
-
-            Bcd.Write(stream, _data3.Length);
-            stream.Write(_data3, 0, _data3.Length);
+            for (int i = 0; i < MaxDataCount; i++)
+            {
+                var data = _dataList[i];
+                if (data != null)
+                {
+                    Bcd.Write(stream, data.Length);
+                    stream.Write(data, 0, data.Length);
+                }
+            }
         }
 
         public XDocument ToXml()
         {
-            if (_items.Count > 8)
+            if (_items.Count > 10)
                 throw new InvalidDataException("Unexpected number of items");
 
             XElement configElem =
                 new XElement(
                     "config",
-                    TextItemToXml(0),
-                    DictionaryItemToXml(1),
-                    TextItemToXml(2),
-                    TextItemToXml(3),
-                    TextItemToXml(4),
-                    TextItemToXml(5),
-                    BinaryItemToXml(6),
-                    BinaryItemToXml(7)
+                    TextItemToXml(0)
                 );
+            XElement item;
+            if (Version == 24)
+            {
+                item = TextItemToXml(1);
+            }
+            else
+            {
+                item = DictionaryItemToXml(1);
+            }
+            configElem.Add(item);
 
-            XElement data1Elem =
-                new XElement(
-                    "data1",
-                    BytesToHex(_data1)
-                );
+            int mid = Version == 24 ? 6 : 5;
+            for (int i = 2; i < _items.Count; i++)
+            {
+                if (i <= mid)
+                {
+                    item = TextItemToXml(i);
+                    configElem.Add(item);
+                }
+                else
+                {
+                    item = BinaryItemToXml(i);
+                    configElem.Add(item);
+                }
+            }
 
-            XElement data2Elem =
-                new XElement(
-                    "data2",
-                    BytesToHex(_data2)
-                );
-
-            XElement data3Elem =
-                new XElement(
-                    "data3",
-                    BytesToHex(_data3)
-                );
+            XElement csystemElem = new XElement("csystem", configElem);
+            for (int i = 0; i < MaxDataCount; i++)
+            {
+                var data = _dataList[i];
+                if (data != null)
+                {
+                    XElement dataElem;
+                    string name = $"data{i + 1}";
+                    mid = Version == 24 ? 0 : -1;
+                    if (i <= mid)
+                    {
+                        dataElem = DictionaryDataToXml(data, name);
+                    }
+                    else if (data.Length % 4 == 0)
+                    {
+                        dataElem = ListDataToXml(data, name);
+                    }
+                    else
+                    {
+                        dataElem = new XElement(
+                            name,
+                            new XAttribute("type", "bytes"),
+                            BytesToHex(data)
+                        );
+                    }
+                    csystemElem.Add(dataElem);
+                }
+            }
 
             return new XDocument(
-                new XElement(
-                    "csystem",
-                    configElem,
-                    data1Elem,
-                    data2Elem,
-                    data3Elem
-                )
+                csystemElem
             );
         }
 
@@ -116,23 +145,17 @@ namespace CSystemArc
                 _items.Add(ItemFromXml(itemElem));
             }
 
-            XElement data1Elem = root.Element("data1");
-            if (data1Elem == null)
-                throw new InvalidDataException("<data1> element is missing");
-
-            _data1 = HexToBytes(data1Elem.Value);
-
-            XElement data2Elem = root.Element("data2");
-            if (data2Elem == null)
-                throw new InvalidDataException("<data2> element is missing");
-
-            _data2 = HexToBytes(data2Elem.Value);
-
-            XElement data3Elem = root.Element("data3");
-            if (data3Elem == null)
-                throw new InvalidDataException("<data3> element is missing");
-
-            _data3 = HexToBytes(data3Elem.Value);
+            _dataList = new List<byte[]>();
+            for (int i = 0; i < MaxDataCount; i++)
+            {
+                XElement dataElem = root.Element($"data{i + 1}");
+                byte[] data = null;
+                if (dataElem != null)
+                {
+                    data = ItemFromXml(dataElem);
+                }
+                _dataList.Add(data);
+            }
         }
 
         private static List<byte[]> UnpackItems(byte[] data)
@@ -283,6 +306,64 @@ namespace CSystemArc
             return dictElem;
         }
 
+        private XElement DictionaryDataToXml(byte[] data, string name)
+        {
+            XElement dictElem =
+                new XElement(
+                    name,
+                    new XAttribute("type", "dict_data")
+                );
+
+            int offset = 0;
+            uint count = BitConverter.ToUInt32(data, offset);
+            offset += 4;
+            while (offset < data.Length)
+            {
+                int valueOffset = offset + 0x10; //fixed
+                string key = null;
+                while (offset < data.Length)
+                {
+                    string c = Helper.ReadUTF16(data, offset);
+                    offset += 2;
+                    if (c.Equals(":"))
+                        break;
+
+                    key += c;
+                }
+                if (offset > valueOffset)
+                    throw new InvalidDataException("Data dictionary bytes invalid.");
+
+                int value = BitConverter.ToInt32(data, valueOffset);
+                offset = valueOffset + 4;
+
+                dictElem.Add(new XElement("entry", new XAttribute("key", key), value.ToString()));
+            }
+            if (count != dictElem.Elements().Count())
+                throw new InvalidDataException("Data dictionary child count invalid.");
+
+            return dictElem;
+        }
+
+        private XElement ListDataToXml(byte[] data, string name)
+        {
+            XElement listElem =
+                new XElement(
+                    name,
+                    new XAttribute("type", "list_data")
+                );
+
+            int offset = 0;
+            while (offset < data.Length)
+            {
+                int value = BitConverter.ToInt32(data, offset);
+                offset += 4;
+                listElem.Add(new XElement("value", value.ToString()));
+            }
+
+            return listElem;
+        }
+
+        // ---------------------------------------------------------------
         private static byte[] ItemFromXml(XElement elem)
         {
             switch (elem.Attribute("type")?.Value)
@@ -295,6 +376,15 @@ namespace CSystemArc
 
                 case "dict":
                     return DictionaryItemFromXml(elem);
+
+                case "dict_data":
+                    return DictionaryDataFromXml(elem);
+
+                case "list_data":
+                    return ListDataFromXml(elem);
+
+                case "bytes":
+                    return HexToBytes(elem.Value);
 
                 default:
                     throw new InvalidDataException("Unrecognized type for <item>");
@@ -356,6 +446,49 @@ namespace CSystemArc
 
                 stream.WriteByte(201);
                 stream.WriteByte(0);
+            }
+
+            byte[] item = new byte[stream.Length];
+            stream.Position = 0;
+            stream.Read(item, 0, item.Length);
+            return item;
+        }
+
+        private static byte[] DictionaryDataFromXml(XElement elem)
+        {
+            MemoryStream stream = new MemoryStream();
+            int count = elem.Elements().Count();
+            byte[] bs = BitConverter.GetBytes(count);
+            stream.Write(bs, 0, bs.Length);
+            foreach (XElement entry in elem.Elements("entry"))
+            {
+                string key = entry.Attribute("key").Value;
+                Helper.WriteUTF16(stream, key);
+                Helper.WriteUTF16(stream, ":");
+                for (int i = (key.Length+1)*2; i < 0x10; i++)
+                {
+                    stream.WriteByte(0);
+                }
+
+                int value = int.Parse(entry.Value);
+                bs = BitConverter.GetBytes(value);
+                stream.Write(bs, 0, bs.Length);
+            }
+
+            byte[] item = new byte[stream.Length];
+            stream.Position = 0;
+            stream.Read(item, 0, item.Length);
+            return item;
+        }
+
+        private static byte[] ListDataFromXml(XElement elem)
+        {
+            MemoryStream stream = new MemoryStream();
+            foreach (XElement entry in elem.Elements("value"))
+            {
+                int value = int.Parse(entry.Value);
+                byte[] bs = BitConverter.GetBytes(value);
+                stream.Write(bs, 0, bs.Length);
             }
 
             byte[] item = new byte[stream.Length];

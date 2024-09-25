@@ -49,13 +49,25 @@ namespace CSystemArc
                         break;
 
                     case "readconfig":
-                        if (args.Length != 3)
+                        if (args.Length == 3)
+                        {
+                            ReadConfig(args[1], args[2], 23);
+                        }
+                        else if (args.Length == 4)
+                        {
+                            if (!int.TryParse(args[3], out int configVersion))
+                            {
+                                Console.WriteLine($"{args[3]} is not a valid version number");
+                                break;
+                            }
+                            ReadConfig(args[1], args[2], configVersion);
+                        }
+                        else
                         {
                             PrintUsage();
                             return;
                         }
-
-                        ReadConfig(args[1], args[2]);
+                        
                         break;
 
                     case "writeconfig":
@@ -290,11 +302,12 @@ namespace CSystemArc
             return $"{id:d06}.png";
         }
 
-        private static void ReadConfig(string datFilePath, string xmlFilePath)
+        private static void ReadConfig(string datFilePath, string xmlFilePath, int configVersion)
         {
             VerifyFileExists(datFilePath);
 
             CSystemConfig config = new CSystemConfig();
+            config.Version = configVersion;
 
             byte[] datContent = File.ReadAllBytes(datFilePath);
             config.Read(new MemoryStream(datContent));
@@ -333,7 +346,7 @@ namespace CSystemArc
             Console.WriteLine("Usage:");
             Console.WriteLine($"  {assembly} unpack index.dat content1.dat content2.dat ... folder");
             Console.WriteLine($"  {assembly} pack version folder index.dat content1.dat content2.dat ...");
-            Console.WriteLine($"  {assembly} readconfig config.dat config.xml");
+            Console.WriteLine($"  {assembly} readconfig config.dat config.xml [opt:version]");
             Console.WriteLine($"  {assembly} writeconfig config.xml config.dat");
         }
     }
