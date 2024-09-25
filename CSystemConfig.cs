@@ -116,7 +116,7 @@ namespace CSystemArc
                     {
                         dataElem = new XElement(
                             name,
-                            new XAttribute("type", "bytes"),
+                            new XAttribute("type", "binary"),
                             BytesToHex(data)
                         );
                     }
@@ -382,9 +382,6 @@ namespace CSystemArc
 
                 case "list_data":
                     return ListDataFromXml(elem);
-
-                case "bytes":
-                    return HexToBytes(elem.Value);
 
                 default:
                     throw new InvalidDataException("Unrecognized type for <item>");
