@@ -103,6 +103,7 @@ namespace CSystemArc
             if (File.Exists(filePath))
             {
                 cacheXml = XDocument.Load(filePath);
+                Console.WriteLine($"Load cache xml in {filePath}");
             }
         }
 
