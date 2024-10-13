@@ -121,7 +121,7 @@ namespace CSystemArc
                 entries = failedEntries;
             } while (failedEntries.Count > 0);
             //保存缓存
-            Cache.Save(Path.Combine(folderPath, ".."));
+            Cache.Save(".");
         }
 
         private static bool TryUnpackEntry(ArchiveReader reader, ArchiveEntry entry, string folderPath)
@@ -179,7 +179,7 @@ namespace CSystemArc
         {
             VerifyFolderExists(folderPath);
             //加载缓存
-            Cache.Load(Path.Combine(folderPath, ".."));
+            Cache.Load(".");
 
             using ArchiveWriter writer = new ArchiveWriter(version, indexFilePath, contentFilePaths);
             PackRawFiles(folderPath, writer);
